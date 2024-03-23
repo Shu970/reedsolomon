@@ -32,6 +32,8 @@ type Encoder interface {
 	// data shards while this is running.
 	Encode(shards [][]byte) error
 
+	Encode_m(shards [][]byte, genMatrix matrix) (matrix, error)
+
 	// EncodeIdx will add parity for a single data shard.
 	// Parity shards should start out as 0. The caller must zero them.
 	// Data shards must be delivered exactly once. There is no check for this.
@@ -627,8 +629,28 @@ func (r *reedSolomon) Encode(shards [][]byte) error {
 	output := shards[r.dataShards:]
 
 	// Do the coding.
+	// NOTE: in cauthy, r.parity stores the exact cauchy matrix
 	r.codeSomeShards(r.parity, shards[0:r.dataShards], output[:r.parityShards], len(shards[0]))
 	return nil
+}
+
+func (r *reedSolomon) Encode_m(shards [][]byte, genMatrix matrix) (matrix, error) {
+	if len(shards) != r.totalShards {
+		return nil, ErrTooFewShards
+	}
+
+	err := checkShards(shards, false)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get the slice of output buffers.
+	output := make([][]byte, r.totalShards)
+
+	// Do the coding.
+	// NOTE: in cauthy, r.parity stores the exact cauchy matrix
+	r.codeSomeShards(genMatrix, shards[0:r.dataShards], output, len(shards[0]))
+	return output, nil
 }
 
 // EncodeIdx will add parity for a single data shard.
@@ -825,6 +847,7 @@ func (r *reedSolomon) canGFNI(byteCount int, inputs, outputs int) bool {
 // number of matrix rows used, is determined by
 // outputCount, which is the number of outputs to compute.
 func (r *reedSolomon) codeSomeShards(matrixRows, inputs, outputs [][]byte, byteCount int) {
+	// NOTE: in Encode(), matrixRows is r.parity, inputs is shards[0:r.dataShards], outputs is shards[r.dataShards:], byteCount is len(shards[0])
 	if len(outputs) == 0 {
 		return
 	}
@@ -841,6 +864,8 @@ func (r *reedSolomon) codeSomeShards(matrixRows, inputs, outputs [][]byte, byteC
 	if r.canGFNI(byteCount, len(inputs), len(outputs)) {
 		var gfni [maxAvx2Inputs * maxAvx2Outputs]uint64
 		m := genGFNIMatrix(matrixRows, len(inputs), 0, len(outputs), gfni[:])
+		// NOTE: use the value of matrixRows as the index of an amazing matrix
+		// NOTE: m is [len(inputs) * len(outputs)]uint64
 		if r.o.useAvx512GFNI {
 			start += galMulSlicesGFNI(m, inputs, outputs, 0, byteCount)
 		} else {
