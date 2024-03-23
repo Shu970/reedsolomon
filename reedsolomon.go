@@ -32,6 +32,7 @@ type Encoder interface {
 	// data shards while this is running.
 	Encode(shards [][]byte) error
 
+	// use for ECDedup
 	Encode_m(shards [][]byte, genMatrix [][]byte) ([][]byte, error)
 
 	// EncodeIdx will add parity for a single data shard.
