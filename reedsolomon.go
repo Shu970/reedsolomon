@@ -32,7 +32,7 @@ type Encoder interface {
 	// data shards while this is running.
 	Encode(shards [][]byte) error
 
-	Encode_m(shards [][]byte, genMatrix matrix) (matrix, error)
+	Encode_m(shards [][]byte, genMatrix [][]byte) ([][]byte, error)
 
 	// EncodeIdx will add parity for a single data shard.
 	// Parity shards should start out as 0. The caller must zero them.
@@ -420,12 +420,12 @@ func New(dataShards, parityShards int, opts ...Option) (Encoder, error) {
 	}
 
 	totShards := dataShards + parityShards
-	switch {
-	case o.withLeopard == leopardGF16 && parityShards > 0 || totShards > 256:
-		return newFF16(dataShards, parityShards, o)
-	case o.withLeopard == leopardAlways && parityShards > 0:
-		return newFF8(dataShards, parityShards, o)
-	}
+	// switch {
+	// case o.withLeopard == leopardGF16 && parityShards > 0 || totShards > 256:
+	// 	return newFF16(dataShards, parityShards, o)
+	// case o.withLeopard == leopardAlways && parityShards > 0:
+	// 	return newFF8(dataShards, parityShards, o)
+	// }
 	if totShards > 256 {
 		return nil, ErrMaxShardNum
 	}
@@ -634,7 +634,7 @@ func (r *reedSolomon) Encode(shards [][]byte) error {
 	return nil
 }
 
-func (r *reedSolomon) Encode_m(shards [][]byte, genMatrix matrix) (matrix, error) {
+func (r *reedSolomon) Encode_m(shards [][]byte, genMatrix [][]byte) ([][]byte, error) {
 	if len(shards) != r.totalShards {
 		return nil, ErrTooFewShards
 	}
