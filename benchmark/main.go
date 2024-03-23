@@ -19,8 +19,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Shu970/reedsolomon"
 	"github.com/klauspost/cpuid/v2"
-	"github.com/klauspost/reedsolomon"
 )
 
 var (
