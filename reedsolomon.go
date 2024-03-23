@@ -636,7 +636,7 @@ func (r *reedSolomon) Encode(shards [][]byte) error {
 }
 
 func (r *reedSolomon) Encode_m(shards [][]byte, genMatrix [][]byte) ([][]byte, error) {
-	if len(shards) != r.totalShards {
+	if len(shards) != r.dataShards { // NOTE: change here
 		return nil, ErrTooFewShards
 	}
 
