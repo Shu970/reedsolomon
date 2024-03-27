@@ -33,7 +33,7 @@ type Encoder interface {
 	Encode(shards [][]byte) error
 
 	// use for ECDedup
-	Encode_m(shards [][]byte, genMatrix [][]byte) ([][]byte, error)
+	Encode_m(shards [][]byte, genMatrix [][]byte) error
 
 	// EncodeIdx will add parity for a single data shard.
 	// Parity shards should start out as 0. The caller must zero them.
@@ -631,27 +631,29 @@ func (r *reedSolomon) Encode(shards [][]byte) error {
 
 	// Do the coding.
 	// NOTE: in cauthy, r.parity stores the exact cauchy matrix
+	// fmt.Printf(">>> %d %d %d >>>\n", len(r.parity), len(r.parity[0]), len(shards[0]))
 	r.codeSomeShards(r.parity, shards[0:r.dataShards], output[:r.parityShards], len(shards[0]))
 	return nil
 }
 
-func (r *reedSolomon) Encode_m(shards [][]byte, genMatrix [][]byte) ([][]byte, error) {
-	if len(shards) != r.dataShards { // NOTE: change here
-		return nil, ErrTooFewShards
+func (r *reedSolomon) Encode_m(shards [][]byte, genMatrix [][]byte) error {
+	if len(shards) != r.totalShards {
+		return ErrTooFewShards
 	}
 
 	err := checkShards(shards, false)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// Get the slice of output buffers.
-	output := make([][]byte, r.totalShards)
+	output := shards[r.dataShards:]
 
 	// Do the coding.
 	// NOTE: in cauthy, r.parity stores the exact cauchy matrix
-	r.codeSomeShards(genMatrix, shards[0:r.dataShards], output, len(shards[0]))
-	return output, nil
+	r.parity = genMatrix
+	r.codeSomeShards(r.parity, shards[0:r.dataShards], output[:r.parityShards], len(shards[0]))
+	return nil
 }
 
 // EncodeIdx will add parity for a single data shard.
