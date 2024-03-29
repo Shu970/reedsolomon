@@ -590,6 +590,152 @@ func New(dataShards, parityShards int, opts ...Option) (Encoder, error) {
 	return &r, err
 }
 
+func New_m(dataShards, parityShards int, genMatrix [][]byte, opts ...Option) (Encoder, error) {
+	o := defaultOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+
+	totShards := dataShards + parityShards
+	// switch {
+	// case o.withLeopard == leopardGF16 && parityShards > 0 || totShards > 256:
+	// 	return newFF16(dataShards, parityShards, o)
+	// case o.withLeopard == leopardAlways && parityShards > 0:
+	// 	return newFF8(dataShards, parityShards, o)
+	// }
+	if totShards > 256 {
+		return nil, ErrMaxShardNum
+	}
+
+	r := reedSolomon{
+		dataShards:   dataShards,
+		parityShards: parityShards,
+		totalShards:  dataShards + parityShards,
+		o:            o,
+	}
+
+	if dataShards <= 0 || parityShards < 0 {
+		return nil, ErrInvShardNum
+	}
+
+	if parityShards == 0 {
+		return &r, nil
+	}
+
+	var err error
+	r.m = genMatrix
+
+	// Calculate what we want per round
+	r.o.perRound = cpuid.CPU.Cache.L2
+	if r.o.perRound < 128<<10 {
+		r.o.perRound = 128 << 10
+	}
+
+	divide := parityShards + 1
+	if avx2CodeGen && r.o.useAVX2 && (dataShards > maxAvx2Inputs || parityShards > maxAvx2Outputs) {
+		// Base on L1 cache if we have many inputs.
+		r.o.perRound = cpuid.CPU.Cache.L1D
+		if r.o.perRound < 32<<10 {
+			r.o.perRound = 32 << 10
+		}
+		divide = 0
+		if dataShards > maxAvx2Inputs {
+			divide += maxAvx2Inputs
+		} else {
+			divide += dataShards
+		}
+		if parityShards > maxAvx2Inputs {
+			divide += maxAvx2Outputs
+		} else {
+			divide += parityShards
+		}
+	}
+
+	if cpuid.CPU.ThreadsPerCore > 1 && r.o.maxGoroutines > cpuid.CPU.PhysicalCores {
+		// If multiple threads per core, make sure they don't contend for cache.
+		r.o.perRound /= cpuid.CPU.ThreadsPerCore
+	}
+
+	// 1 input + parity must fit in cache, and we add one more to be safer.
+	r.o.perRound = r.o.perRound / divide
+	// Align to 64 bytes.
+	r.o.perRound = ((r.o.perRound + 63) / 64) * 64
+
+	// Final sanity check...
+	if r.o.perRound < 1<<10 {
+		r.o.perRound = 1 << 10
+	}
+
+	if r.o.minSplitSize <= 0 {
+		// Set minsplit as high as we can, but still have parity in L1.
+		cacheSize := cpuid.CPU.Cache.L1D
+		if cacheSize <= 0 {
+			cacheSize = 32 << 10
+		}
+
+		r.o.minSplitSize = cacheSize / (parityShards + 1)
+		// Min 1K
+		if r.o.minSplitSize < 1024 {
+			r.o.minSplitSize = 1024
+		}
+	}
+
+	if r.o.shardSize > 0 {
+		p := runtime.GOMAXPROCS(0)
+		if p == 1 || r.o.shardSize <= r.o.minSplitSize*2 {
+			// Not worth it.
+			r.o.maxGoroutines = 1
+		} else {
+			g := r.o.shardSize / r.o.perRound
+
+			// Overprovision by a factor of 2.
+			if g < p*2 && r.o.perRound > r.o.minSplitSize*2 {
+				g = p * 2
+				r.o.perRound /= 2
+			}
+
+			// Have g be multiple of p
+			g += p - 1
+			g -= g % p
+
+			r.o.maxGoroutines = g
+		}
+	}
+
+	// Generated AVX2 does not need data to stay in L1 cache between runs.
+	// We will be purely limited by RAM speed.
+	if r.canAVX2C(avx2CodeGenMinSize, maxAvx2Inputs, maxAvx2Outputs) && r.o.maxGoroutines > avx2CodeGenMaxGoroutines {
+		r.o.maxGoroutines = avx2CodeGenMaxGoroutines
+	}
+
+	if r.canGFNI(avx2CodeGenMinSize, maxAvx2Inputs, maxAvx2Outputs) && r.o.maxGoroutines > gfniCodeGenMaxGoroutines {
+		r.o.maxGoroutines = gfniCodeGenMaxGoroutines
+	}
+
+	// Inverted matrices are cached in a tree keyed by the indices
+	// of the invalid rows of the data to reconstruct.
+	// The inversion root node will have the identity matrix as
+	// its inversion matrix because it implies there are no errors
+	// with the original data.
+	if r.o.inversionCache {
+		r.tree = newInversionTree(dataShards, parityShards)
+	}
+
+	r.parity = make([][]byte, parityShards)
+	for i := range r.parity {
+		r.parity[i] = r.m[dataShards+i]
+	}
+
+	if avx2CodeGen && r.o.useAVX2 {
+		sz := r.dataShards * r.parityShards * 2 * 32
+		r.mPool.New = func() interface{} {
+			return AllocAligned(1, sz)[0]
+		}
+		r.mPoolSz = sz
+	}
+	return &r, err
+}
+
 func (r *reedSolomon) getTmpSlice() []byte {
 	return r.mPool.Get().([]byte)
 }
