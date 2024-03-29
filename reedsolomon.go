@@ -782,6 +782,15 @@ func (r *reedSolomon) Encode(shards [][]byte) error {
 	return nil
 }
 
+func (r *reedSolomon) ChangeGenMatrix(genMatrix [][]byte) error {
+	r.m = genMatrix
+	r.parity = make([][]byte, r.parityShards)
+	for i := range r.parity {
+		r.parity[i] = r.m[r.dataShards+i]
+	}
+	return nil
+}
+
 func (r *reedSolomon) Encode_m(shards [][]byte, genMatrix [][]byte) error {
 	if len(shards) != r.totalShards {
 		return ErrTooFewShards
