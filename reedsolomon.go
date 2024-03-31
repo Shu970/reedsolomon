@@ -35,6 +35,9 @@ type Encoder interface {
 	// use for ECDedup
 	Encode_m(shards [][]byte, genMatrix [][]byte) error
 
+	// use for ECDedup
+	ChangeGenMatrix(genMatrix [][]byte) error
+
 	// EncodeIdx will add parity for a single data shard.
 	// Parity shards should start out as 0. The caller must zero them.
 	// Data shards must be delivered exactly once. There is no check for this.
